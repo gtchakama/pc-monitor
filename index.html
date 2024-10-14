@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Performance Monitor Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.2/socket.io.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'custom-bg': '#1a1a1a',
+                        'custom-text': '#ffffff',
+                        'custom-accent': '#00ff00',
+                        'custom-secondary': '#333333',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-custom-bg text-custom-text min-h-screen p-4">
+    <div class="container mx-auto">
+        <h1 class="text-3xl font-bold text-center text-custom-accent mb-8">Enhanced Performance Monitor Dashboard</h1>
+
+        <div class="mb-8">
+            <div class="flex flex-wrap justify-center gap-4 mb-4">
+                <select id="timeRange" class="bg-custom-secondary text-custom-text p-2 rounded">
+                    <option value="1">Last 1 minute</option>
+                    <option value="5">Last 5 minutes</option>
+                    <option value="15">Last 15 minutes</option>
+                    <option value="30">Last 30 minutes</option>
+                    <option value="60">Last 1 hour</option>
+                </select>
+                <select id="interval" class="bg-custom-secondary text-custom-text p-2 rounded">
+                    <option value="5">5 seconds</option>
+                    <option value="10">10 seconds</option>
+                    <option value="30">30 seconds</option>
+                    <option value="60">1 minute</option>
+                </select>
+                <button onclick="fetchHistoricalData(1)" class="bg-custom-accent text-custom-bg p-2 rounded hover:bg-opacity-80 transition-colors">
+                    Apply Filters
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div class="bg-custom-secondary p-4 rounded-lg shadow-lg hover:shadow-xl transition-shadow">
+                <h2 class="text-xl font-semibold text-custom-accent mb-2">CPU Usage</h2>
+                <div id="cpuUsage" class="text-4xl font-bold">0%</div>
+            </div>
+            <div class="bg-custom-secondary p-4 rounded-lg shadow-lg hover:shadow-xl transition-shadow">
+                <h2 class="text-xl font-semibold text-custom-accent mb-2">Memory Usage</h2>
+                <div id="memoryUsage" class="text-4xl font-bold">0%</div>
+            </div>
+            <div class="bg-custom-secondary p-4 rounded-lg shadow-lg hover:shadow-xl transition-shadow">
+                <h2 class="text-xl font-semibold text-custom-accent mb-2">Disk Usage</h2>
+                <div id="diskUsage" class="text-4xl font-bold">0%</div>
+            </div>
+            <div class="bg-custom-secondary p-4 rounded-lg shadow-lg hover:shadow-xl transition-shadow">
+                <h2 class="text-xl font-semibold text-custom-accent mb-2">System Uptime</h2>
+                <div id="uptime" class="text-4xl font-bold">0h 0m 0s</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+            <div class="bg-custom-secondary p-4 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-semibold text-custom-accent mb-4">Network Interfaces</h2>
+                <div id="networkInterfaces" class="space-y-2"></div>
+            </div>
+            <div class="bg-custom-secondary p-4 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-semibold text-custom-accent mb-4">Network Speeds</h2>
+                <div id="networkSpeeds" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <div class="bg-custom-secondary p-4 rounded-lg shadow-lg mb-8">
+            <h2 class="text-2xl font-semibold text-custom-accent mb-4">System Information</h2>
+            <div id="systemInfo" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </div>
+
+        <div class="bg-custom-secondary rounded-lg shadow-lg p-4 mb-8">
+            <h2 class="text-2xl font-semibold text-custom-accent mb-4">Remote Command Execution</h2>
+            <div class="flex flex-col space-y-2">
+                <select id="commandSelect" class="bg-custom-bg text-custom-text p-2 rounded">
+                    <option value="">Select a command</option>
+                    <option value="uptime">System Uptime</option>
+                    <option value="free -h">Memory Usage</option>
+                    <option value="df -h">Disk Usage</option>
+                    <option value="ps aux --sort=-%cpu | head -n 5">Top 5 CPU-consuming processes</option>
+                    <option value="netstat -tuln">Network Connections</option>
+                </select>
+                <input type="password" id="commandToken" placeholder="Enter command token" class="bg-custom-bg text-custom-text p-2 rounded">
+                <button onclick="executeCommand()" class="bg-custom-accent text-custom-bg p-2 rounded hover:bg-opacity-80 transition-colors">
+                    Execute Command
+                </button>
+                <pre id="commandOutput" class="bg-custom-bg p-2 rounded mt-2 whitespace-pre-wrap"></pre>
+            </div>
+        </div>
+
+        <div class="bg-custom-secondary rounded-lg shadow-lg p-4 overflow-x-auto">
+            <h2 class="text-2xl font-semibold text-custom-accent mb-4">Historical Data</h2>
+            <table class="w-full">
+                <thead>
+                    <tr>
+                        <th class="text-left p-2">Timestamp</th>
+                        <th class="text-left p-2">CPU Usage</th>
+                        <th class="text-left p-2">Memory Usage</th>
+                        <th class="text-left p-2">Disk Usage</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody"></tbody>
+            </table>
+            <div id="pagination" class="mt-4 flex justify-center items-center space-x-2">
+                <!-- Pagination controls will be added here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        socket.on('performanceData', (data) => {
+            updateDashboard(data);
+        });
+
+        function updateDashboard(data) {
+            document.getElementById('cpuUsage').textContent = `${data.cpuUsage}%`;
+            document.getElementById('memoryUsage').textContent = `${data.memoryUsage}%`;
+            document.getElementById('diskUsage').textContent = `${data.diskUsage}%`;
+            document.getElementById('uptime').textContent = data.uptime;
+
+            // Update network interfaces
+            const networkInterfacesEl = document.getElementById('networkInterfaces');
+            networkInterfacesEl.innerHTML = '';
+            data.network.interfaces.forEach(iface => {
+                const interfaceEl = document.createElement('div');
+                interfaceEl.innerHTML = `
+                    <p><strong>${iface.name}:</strong> ${iface.ip} (${iface.type})</p>
+                    <p class="text-sm">MAC: ${iface.mac}, Speed: ${iface.speed} Mbps</p>
+                `;
+                networkInterfacesEl.appendChild(interfaceEl);
+            });
+
+            // Update network speeds
+            const networkSpeedsEl = document.getElementById('networkSpeeds');
+            networkSpeedsEl.innerHTML = '';
+            data.network.speeds.forEach(speed => {
+                const speedEl = document.createElement('div');
+                speedEl.innerHTML = `
+                    <p><strong>${speed.interface}:</strong></p>
+                    <p>Download: ${speed.rx_sec}/s, Upload: ${speed.tx_sec}/s</p>
+                `;
+                networkSpeedsEl.appendChild(speedEl);
+            });
+
+            // Update system info
+            const systemInfoEl = document.getElementById('systemInfo');
+            systemInfoEl.innerHTML = `
+                <div>
+                    <p><strong>CPU:</strong> ${data.system.cpu.manufacturer} ${data.system.cpu.brand}</p>
+                    <p><strong>Cores:</strong> ${data.system.cpu.cores}</p>
+                </div>
+                <div>
+                    <p><strong>OS:</strong> ${data.system.os.distro} ${data.system.os.release}</p>
+                    <p><strong>Kernel:</strong> ${data.system.os.kernel}</p>
+                    <p><strong>Architecture:</strong> ${data.system.os.arch}</p>
+                </div>
+                <div>
+                    <p><strong>Total Memory:</strong> ${data.system.totalMemory}</p>
+                    <p><strong>Free Memory:</strong> ${data.freeMemory}</p>
+                </div>
+                <div>
+                    <p><strong>Total Disk:</strong> ${data.totalDisk}</p>
+                    <p><strong>Free Disk:</strong> ${data.freeDisk}</p>
+                </div>
+            `;
+
+            // Display alerts
+            if (data.alerts && data.alerts.length > 0) {
+                const alertElement = document.createElement('div');
+                alertElement.className = 'bg-red-500 text-white p-2 rounded mt-4';
+                alertElement.textContent = data.alerts.join(', ');
+                document.querySelector('.container').prepend(alertElement);
+                setTimeout(() => alertElement.remove(), 5000);
+            }
+        }
+
+        function fetchHistoricalData(page = 1) {
+            const timeRange = document.getElementById('timeRange').value;
+            const interval = document.getElementById('interval').value;
+
+            fetch(`/api/history?minutes=${timeRange}&interval=${interval}&page=${page}`)
+                .then(response => response.json())
+                .then(result => {
+                    const historyBody = document.getElementById('historyBody');
+                    historyBody.innerHTML = '';
+                    result.data.forEach(item => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td class="p-2">${new Date(item.timestamp).toLocaleString()}</td>
+                            <td class="p-2">${item.cpuUsage}%</td>
+                            <td class="p-2">${item.memoryUsage}%</td>
+                            <td class="p-2">${item.diskUsage}%</td>
+                        `;
+                        historyBody.appendChild(row);
+                    });
+                    updatePagination(result.pagination);
+                });
+        }
+
+        function updatePagination(pagination) {
+            const paginationElement = document.getElementById('pagination');
+            paginationElement.innerHTML = '';
+
+            if (pagination.totalPages > 1) {
+                for (let i = 1; i <= pagination.totalPages; i++) {
+                    const button = document.createElement('button');
+                    button.textContent = i;
+                    button.className = `px-3 py-1 rounded ${i === pagination.currentPage ? 'bg-custom-accent text-custom-bg' : 'bg-custom-secondary text-custom-text'}`;
+                    button.onclick = () => fetchHistoricalData(i);
+                    paginationElement.appendChild(button);
+                }
+            }
+        }
+
+        function executeCommand() {
+            const command = document.getElementById('commandSelect').value;
+            const token = document.getElementById('commandToken').value;
+            const outputElement = document.getElementById('commandOutput');
+
+            if (!command) {
+                outputElement.textContent = 'Please select a command.';
+                return;
+            }
+
+            if (!token) {
+                outputElement.textContent = 'Please enter the command token.';
+                return;
+            }
+
+            fetch('/api/execute-command', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ command, token }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    outputElement.textContent = `Error: ${data.error}`;
+                } else {
+                    outputElement.textContent = data.output;
+                }
+            })
+            .catch(error => {
+                outputElement.textContent = `Error: ${error.message}`;
+            });
+        }
+
+        // Fetch initial historical data
+        fetchHistoricalData();
+    </script>
+</body>
+</html>
